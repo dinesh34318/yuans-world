@@ -1,0 +1,241 @@
+// Yuan's World - Database Schema
+// Using SQLite for local development, can swap to PostgreSQL for production
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── User Model (Parent accounts) ──────────────────────────────────────────
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("PARENT") // PARENT only - children use Child model
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  children      Child[]
+  activities    Activity[]
+  approvals     Approval[]
+  notifications Notification[]
+  rules         Rule[]
+  rewardConfig  RewardConfig?
+}
+
+// ─── Child Model ───────────────────────────────────────────────────────────
+model Child {
+  id            String   @id @default(cuid())
+  childId       String   @unique // Unique login ID for children (e.g., "yuan123")
+  name          String
+  pinHash       String   // 4-6 digit PIN, hashed
+  avatar        String   @default("🦁") // Emoji avatar
+  points        Int      @default(0)
+  level         Int      @default(1)
+  currentStreak Int      @default(0)
+  longestStreak Int      @default(0)
+  parentId      String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  parent              User                @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  submissions         ActivitySubmission[]
+  achievements        Achievement[]
+  dailyStreaks         DailyStreak[]
+  ruleAcknowledgments RuleAcknowledgment[]
+  schedules           ActivitySchedule[]
+  notifications       ChildNotification[]
+}
+
+// ─── Activity Model ────────────────────────────────────────────────────────
+model Activity {
+  id              String   @id @default(cuid())
+  name            String
+  description     String   @default("")
+  category        String   // STUDYING, READING, OUTDOOR, CHORES, CLEANLINESS, OTHER
+  icon            String   @default("📚")
+  pointValue      Int      @default(10)
+  requiresPhoto   Boolean  @default(false)
+  requiresApproval Boolean @default(true)
+  isActive        Boolean  @default(true)
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  createdBy   User               @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  schedules   ActivitySchedule[]
+  submissions ActivitySubmission[]
+}
+
+// ─── Activity Schedule Model ───────────────────────────────────────────────
+model ActivitySchedule {
+  id         String   @id @default(cuid())
+  activityId String
+  childId    String
+  frequency  String   // DAILY, EVERY_2_DAYS, EVERY_3_DAYS, EVERY_4_DAYS
+  startDate  DateTime
+  endDate    DateTime?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  activity    Activity             @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  child       Child                @relation(fields: [childId], references: [id], onDelete: Cascade)
+  submissions ActivitySubmission[]
+
+  // Prevent duplicate schedules for same activity-child combination
+  @@unique([activityId, childId, frequency])
+}
+
+// ─── Activity Submission Model ─────────────────────────────────────────────
+model ActivitySubmission {
+  id            String   @id @default(cuid())
+  activityId    String
+  childId       String
+  scheduleId    String
+  description   String   @default("")
+  photoPath     String?  // Private path to uploaded photo
+  status        String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  submittedDate DateTime @default(now()) // The date this submission is for
+  pointsAwarded Int      @default(0) // Points awarded upon approval (prevents double-award)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  activity Activity         @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  child    Child             @relation(fields: [childId], references: [id], onDelete: Cascade)
+  schedule ActivitySchedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  approval Approval?
+
+  // Prevent duplicate submissions for same activity-child-date
+  @@unique([activityId, childId, submittedDate])
+}
+
+// ─── Approval Model ───────────────────────────────────────────────────────
+model Approval {
+  id           String   @id @default(cuid())
+  submissionId String   @unique
+  parentId     String
+  decision     String   // APPROVED, REJECTED
+  feedback     String   @default("")
+  decidedAt    DateTime @default(now())
+
+  // Relations
+  submission ActivitySubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  parent     User               @relation(fields: [parentId], references: [id], onDelete: Cascade)
+}
+
+// ─── Achievement Model ─────────────────────────────────────────────────────
+model Achievement {
+  id            String   @id @default(cuid())
+  childId       String
+  badgeName     String
+  badgeIcon     String
+  description   String
+  pointsAwarded Int      @default(0)
+  earnedAt      DateTime @default(now())
+
+  // Relations
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+}
+
+// ─── Daily Streak Model ────────────────────────────────────────────────────
+model DailyStreak {
+  id                  String   @id @default(cuid())
+  childId             String
+  date                DateTime
+  completed           Boolean  @default(false)
+  activitiesCompleted Int      @default(0)
+  activitiesTotal     Int      @default(0)
+
+  // Relations
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([childId, date])
+}
+
+// ─── Rule Model ────────────────────────────────────────────────────────────
+model Rule {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  icon        String   @default("📋")
+  orderIndex  Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  createdBy       User                 @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  acknowledgments RuleAcknowledgment[]
+}
+
+// ─── Rule Acknowledgment Model ─────────────────────────────────────────────
+model RuleAcknowledgment {
+  id             String   @id @default(cuid())
+  ruleId         String
+  childId        String
+  acknowledgedAt DateTime @default(now())
+
+  // Relations
+  rule  Rule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, childId])
+}
+
+// ─── Notification Model (for Parents) ──────────────────────────────────────
+model Notification {
+  id           String   @id @default(cuid())
+  userId       String
+  title        String
+  message      String
+  type         String   // REMINDER, ACHIEVEMENT, APPROVAL, SYSTEM
+  isRead       Boolean  @default(false)
+  scheduledFor DateTime?
+  createdAt    DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Child Notification Model ──────────────────────────────────────────────
+model ChildNotification {
+  id        String   @id @default(cuid())
+  childId   String
+  title     String
+  message   String
+  type      String   // REMINDER, ACHIEVEMENT, APPROVAL, SYSTEM
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relations
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+}
+
+// ─── Reward Configuration Model ────────────────────────────────────────────
+model RewardConfig {
+  id               String @id @default(cuid())
+  parentId         String @unique
+  pointsPerActivity Int   @default(10)
+  bonusStreak3Days  Int   @default(5)
+  bonusStreak7Days  Int   @default(15)
+  bonusStreak30Days Int   @default(50)
+  level1Threshold   Int   @default(0)
+  level2Threshold   Int   @default(100)
+  level3Threshold   Int   @default(300)
+  level4Threshold   Int   @default(600)
+  level5Threshold   Int   @default(1000)
+
+  // Relations
+  parent User @relation(fields: [parentId], references: [id], onDelete: Cascade)
+}
